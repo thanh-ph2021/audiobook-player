@@ -1,0 +1,10 @@
+# Thư viện tải về, chạy `npm install` là có lại
+node_modules/
+
+# File build ra, không đưa lên repo (hãy đưa lên mục Releases)
+dist/
+
+# File rác của hệ điều hành
+Thumbs.db
+.DS_Store
+desktop.ini

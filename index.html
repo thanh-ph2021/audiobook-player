@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audiobook Player</title>
+<script>
+  // Áp theme sớm để tránh bị nháy màu khi mở trang
+  try {
+    const t = localStorage.getItem('abp:theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.dataset.theme = t;
+  } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+</script>
+<style>
+  :root {
+    --bg: #0b0b10;
+    --panel: rgba(255,255,255,.05);
+    --panel-hover: rgba(255,255,255,.09);
+    --line: rgba(255,255,255,.08);
+    --text: #f4f4f8;
+    --muted: #9a9aab;
+    --accent: #8b6cff;
+    --accent2: #3dd6c6;
+    --thumb: 56px;
+    --shade: rgba(8,8,12,.55);
+    --player-bg: rgba(12,12,18,.72);
+    --opt-bg: #1a1a22;
+    --cover-bg: #1d1d27;
+    --ph-text: rgba(255,255,255,.25);
+    --track: rgba(255,255,255,.16);
+    --scroll: rgba(255,255,255,.14);
+    --play-bg: #fff;
+    --play-fg: #111;
+    --play-shadow: rgba(255,255,255,.18);
+    --shadow-lg: rgba(0,0,0,.55);
+    --glow1: #2a1f5c;
+    --glow2: #0f3d3a;
+    --bg-opacity: .75;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f4f8;
+    --panel: rgba(0,0,0,.04);
+    --panel-hover: rgba(0,0,0,.07);
+    --line: rgba(0,0,0,.09);
+    --text: #16161d;
+    --muted: #6b6b7b;
+    --accent: #7550f0;
+    --shade: rgba(255,255,255,.6);
+    --player-bg: rgba(255,255,255,.78);
+    --opt-bg: #fff;
+    --cover-bg: #e4e4ee;
+    --ph-text: rgba(0,0,0,.25);
+    --track: rgba(0,0,0,.14);
+    --scroll: rgba(0,0,0,.2);
+    --play-bg: #16161d;
+    --play-fg: #fff;
+    --play-shadow: rgba(0,0,0,.25);
+    --shadow-lg: rgba(0,0,0,.25);
+    --glow1: #d9d0ff;
+    --glow2: #c8f3ee;
+    --bg-opacity: .6;
+    color-scheme: light;
+  }
+  body.size-s { --thumb: 40px; }
+  body.size-m { --thumb: 56px; }
+  body.size-l { --thumb: 84px; }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--text); background: var(--bg); overflow: hidden;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  button, select, input { font: inherit; color: inherit; }
+
+  /* Nền mờ lấy từ ảnh bìa đang phát */
+  #bg {
+    position: fixed; inset: -60px; z-index: 0;
+    background: radial-gradient(circle at 20% 10%, var(--glow1) 0%, transparent 55%),
+                radial-gradient(circle at 90% 90%, var(--glow2) 0%, transparent 50%), var(--bg);
+    background-size: cover; background-position: center;
+    filter: blur(70px) saturate(1.4); opacity: var(--bg-opacity); transition: background-image .6s;
+  }
+  #bg.has-cover { background-size: cover; }
+  .shade { position: fixed; inset: 0; z-index: 1; background: var(--shade); }
+
+  .app {
+    position: relative; z-index: 2; height: 100vh;
+    display: grid; grid-template-columns: 340px 1fr; grid-template-rows: 1fr auto;
+    grid-template-areas: "side main" "player player";
+  }
+
+  /* ---------- Cột trái ---------- */
+  .side {
+    grid-area: side; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px;
+    overflow-y: auto; border-right: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .3px; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center;
+  }
+  .brand .logo svg { width: 16px; height: 16px; fill: #fff; }
+  .btn-primary {
+    border: 0; cursor: pointer; padding: 12px 18px; border-radius: 14px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #6d8cff); color: #fff;
+    box-shadow: 0 8px 24px rgba(139,108,255,.35); transition: transform .15s, box-shadow .15s;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(139,108,255,.5); }
+  .bigcover {
+    width: 100%; aspect-ratio: 1; border-radius: 22px; background-size: cover; background-position: center;
+    background-color: var(--cover-bg); display: grid; place-items: center; font-size: 64px; color: var(--ph-text);
+    box-shadow: 0 24px 60px var(--shadow-lg); transition: transform .3s;
+  }
+  body.is-playing .bigcover { transform: scale(1.015); }
+  .now-title { font-size: 20px; font-weight: 700; line-height: 1.25; word-break: break-word; }
+  .now-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 17px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+  select, .search {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 9px 12px; outline: none; color: var(--text);
+  }
+  select option { background: var(--opt-bg); color: var(--text); }
+  select:focus, .search:focus { border-color: var(--accent); }
+
+  /* ---------- Danh sách ---------- */
+  main { grid-area: main; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .toolbar { display: flex; gap: 10px; padding: 22px 24px 12px; align-items: center; }
+  .toolbar .search { flex: 1; min-width: 0; }
+  #list { list-style: none; margin: 0; padding: 4px 16px 20px; overflow-y: auto; flex: 1; }
+  #list li {
+    display: grid; grid-template-columns: 34px var(--thumb) 1fr auto; gap: 14px; align-items: center;
+    padding: 8px 12px; border-radius: 14px; cursor: pointer; transition: background .15s;
+  }
+  #list li:hover { background: var(--panel-hover); }
+  #list li.active { background: linear-gradient(90deg, rgba(139,108,255,.22), rgba(139,108,255,.06)); }
+  #list li.active .title { color: var(--text); font-weight: 700; }
+  #list li.done .title { color: var(--muted); }
+  .idx { color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .eq { display: none; align-items: flex-end; justify-content: center; gap: 2px; height: 16px; }
+  .eq i { width: 3px; background: var(--accent2); border-radius: 2px; animation: eq 0.9s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: .2s; } .eq i:nth-child(3) { animation-delay: .4s; }
+  @keyframes eq { 0%,100% { height: 4px; } 50% { height: 16px; } }
+  li.active.playing .idx span { display: none; }
+  li.active.playing .eq { display: flex; }
+  .thumb {
+    width: var(--thumb); height: var(--thumb); border-radius: 12px; background-size: cover; background-position: center;
+    display: grid; place-items: center; font-weight: 700; color: rgba(255,255,255,.85);
+    box-shadow: 0 6px 16px rgba(0,0,0,.35);
+  }
+  .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; }
+  .path { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dur { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .empty { margin: 12vh auto 0; text-align: center; color: var(--muted); max-width: 360px; line-height: 1.6; }
+  .empty h2 { color: var(--text); margin: 0 0 8px; }
+
+  /* ---------- Player dưới ---------- */
+  .player {
+    grid-area: player; display: grid; grid-template-columns: 1fr minmax(320px, 2fr) 1fr; align-items: center; gap: 16px;
+    padding: 12px 24px; background: var(--player-bg); backdrop-filter: blur(24px); border-top: 1px solid var(--line);
+  }
+  .p-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .p-left .thumb { width: 52px; height: 52px; flex: none; }
+  .p-center { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .controls { display: flex; align-items: center; gap: 14px; }
+  .ico {
+    background: none; border: 0; cursor: pointer; color: var(--muted); width: 38px; height: 38px; border-radius: 50%;
+    display: grid; place-items: center; position: relative; transition: color .15s, background .15s;
+  }
+  .ico:hover { color: var(--text); background: var(--panel-hover); }
+  .ico svg { width: 22px; height: 22px; fill: currentColor; }
+  .ico small { position: absolute; font-size: 8px; font-weight: 800; top: 14px; }
+  .ico.flip svg { transform: scaleX(-1); }
+  .play {
+    width: 48px; height: 48px; background: var(--play-bg); color: var(--play-fg);
+    box-shadow: 0 8px 22px var(--play-shadow);
+  }
+  .play:hover { background: var(--play-bg); color: var(--play-fg); transform: scale(1.07); }
+  .play svg { width: 24px; height: 24px; }
+  .seek { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 640px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .seek span { min-width: 44px; }
+  .seek span:first-child { text-align: right; }
+  .p-right { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; height: 5px; border-radius: 99px; outline: none; cursor: pointer; flex: 1;
+    background: linear-gradient(to right, var(--accent) var(--pct, 0%), var(--track) var(--pct, 0%));
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--text); opacity: 0; transition: opacity .15s;
+  }
+  input[type=range]:hover::-webkit-slider-thumb { opacity: 1; }
+  input[type=range]::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-radius: 50%; background: var(--text); }
+
+  .link { background: none; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; text-align: left; padding: 0; margin-top: -8px; text-decoration: underline; }
+  .link:hover { color: var(--text); }
+  .rec { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
+  .rec:hover { background: var(--panel-hover); }
+  .rec-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; cursor: pointer; padding: 8px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .rec-x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 6px 10px; font-size: 16px; border-radius: 8px; }
+  .rec-x:hover { color: var(--text); }
+  #toast {
+    position: fixed; left: 50%; bottom: 110px; transform: translate(-50%, 20px); z-index: 10; max-width: 80vw;
+    background: var(--opt-bg); color: var(--text); border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px;
+    box-shadow: 0 10px 30px var(--shadow-lg); opacity: 0; pointer-events: none; transition: .25s; font-size: 14px;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; grid-template-areas: "main" "player"; }
+    .side { display: none; }
+    .player { grid-template-columns: 1fr; }
+    .p-left, .p-right { display: none; }
+  }
+</style>
+</head>
+<body class="size-m">
+<div id="bg"></div><div class="shade"></div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg></div>
+      Audiobook Player
+    </div>
+    <button class="btn-primary" id="pick">Chọn thư mục</button>
+    <input type="file" id="picker" webkitdirectory multiple hidden>
+    <button class="link" id="pickLegacy" title="Dùng khi chọn cả ổ đĩa bị chặn hoặc trình duyệt không hỗ trợ">Chọn kiểu cũ (không lưu vào Gần đây)</button>
+
+    <div class="bigcover" id="bigCover">♪</div>
+    <div>
+      <div class="now-title" id="nowTitle">Chưa chọn file</div>
+      <div class="now-sub" id="nowSub">Chọn thư mục để bắt đầu</div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><b id="stCount">0</b><span>file audio</span></div>
+      <div class="stat"><b id="stTotal">–</b><span>tổng thời lượng</span></div>
+    </div>
+
+    <label class="field">Hẹn giờ tắt
+      <select id="sleep">
+        <option value="0">Tắt</option><option value="15">15 phút</option><option value="30">30 phút</option>
+        <option value="45">45 phút</option><option value="60">60 phút</option><option value="end">Hết file đang nghe</option>
+      </select>
+    </label>
+
+    <div id="recentWrap" style="display:none">
+      <div class="field" style="margin-bottom:6px">Thư mục gần đây</div>
+      <div id="recent"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <input class="search" id="search" placeholder="Tìm theo tên…">
+      <select id="sort" title="Sắp xếp">
+        <option value="az">Tên A → Z</option><option value="za">Tên Z → A</option><option value="date">Ngày sửa</option>
+      </select>
+      <select id="size" title="Cỡ thumbnail">
+        <option value="s">Thumb nhỏ</option><option value="m" selected>Thumb vừa</option><option value="l">Thumb lớn</option>
+      </select>
+      <button class="ico" id="theme" title="Đổi giao diện sáng/tối"></button>
+    </div>
+    <ul id="list">
+      <div class="empty">
+        <h2>Chưa có thư mục nào</h2>
+        Bấm <b>Chọn thư mục</b> để nạp các file audio. App sẽ tự sắp xếp theo tên và lấy ảnh bìa nếu có.
+        <div id="continueBox" style="margin-top:18px"></div>
+      </div>
+    </ul>
+  </main>
+
+  <footer class="player">
+    <div class="p-left">
+      <div class="thumb" id="miniThumb" style="background-color:#262633">♪</div>
+      <div style="min-width:0">
+        <div class="title" id="miniTitle">Chưa chọn file</div>
+        <div class="path" id="miniSub"></div>
+      </div>
+    </div>
+
+    <div class="p-center">
+      <div class="controls">
+        <button class="ico" id="back15" title="Lùi 15 giây"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg><small>15</small></button>
+        <button class="ico" id="prev" title="Bài trước"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
+        <button class="ico play" id="play" title="Phát / Dừng"></button>
+        <button class="ico" id="next" title="Bài sau"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18V6l8.5 6z"/></svg></button>
+        <button class="ico flip" id="fwd15" title="Tới 15 giây"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg><small style="transform:scaleX(-1)">15</small></button>
+      </div>
+      <div class="seek">
+        <span id="cur">0:00</span>
+        <input type="range" id="seek" min="0" max="0" value="0" step="1">
+        <span id="total">0:00</span>
+      </div>
+    </div>
+
+    <div class="p-right">
+      <select id="rate" title="Tốc độ">
+        <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+      </select>
+      <input type="range" id="vol" min="0" max="1" step="0.05" value="1" style="width:90px;flex:none">
+    </div>
+  </footer>
+</div>
+
+<div id="toast"></div>
+<audio id="audio" preload="metadata"></audio>
+
+<script>
+const $ = id => document.getElementById(id);
+const audio = $('audio'), list = $('list');
+
+const AUDIO_EXT = /\.(mp3|m4a|m4b|aac|wav|flac|ogg|opus)$/i;
+const IMG_EXT   = /\.(jpe?g|png|webp|gif|bmp)$/i;
+const ICON_PLAY  = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+$('play').innerHTML = ICON_PLAY;
+
+let tracks = [], cur = null, rootName = '', allUrls = [], loadToken = 0;
+let imageMap = new Map(), dirCover = new Map(), saved = { last: null, pos: {}, done: {} };
+let sleepTimer = null, sleepAtEnd = false, lastSave = 0;
+
+const collator = new Intl.Collator('vi', { numeric: true, sensitivity: 'base' });
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase();
+const baseName = p => p.replace(/\.[^./]+$/, '');
+const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+const fmt = s => {
+  if (!isFinite(s) || s < 0) s = 0;
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+};
+const hue = i => (i * 47 + 250) % 360;
+const placeholder = i => `linear-gradient(135deg, hsl(${hue(i)} 55% 42%), hsl(${hue(i) + 40} 55% 28%))`;
+
+/* ============ Đọc ảnh bìa nhúng trong file ============ */
+function sniffMime(b) {
+  if (b[0] === 0xFF && b[1] === 0xD8) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+  if (b[0] === 0x47 && b[1] === 0x49) return 'image/gif';
+  if (b[0] === 0x52 && b[1] === 0x49) return 'image/webp';
+  return 'image/jpeg';
+}
+
+// MP3: thẻ ID3v2, khung APIC
+async function readID3Cover(file) {
+  const head = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+  if (head[0] !== 0x49 || head[1] !== 0x44 || head[2] !== 0x33) return null;
+  const ver = head[3];
+  const size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
+  const buf = new Uint8Array(await file.slice(10, 10 + Math.min(size, 16 * 1024 * 1024)).arrayBuffer());
+  let p = 0;
+  while (p + 10 <= buf.length) {
+    const id = String.fromCharCode(buf[p], buf[p + 1], buf[p + 2], buf[p + 3]);
+    if (!/^[A-Z0-9]{4}$/.test(id)) break;
+    const fs = ver === 4
+      ? (buf[p + 4] << 21) | (buf[p + 5] << 14) | (buf[p + 6] << 7) | buf[p + 7]
+      : ((buf[p + 4] << 24) | (buf[p + 5] << 16) | (buf[p + 6] << 8) | buf[p + 7]) >>> 0;
+    const start = p + 10, end = start + fs;
+    if (end > buf.length) break;
+    if (id === 'APIC') {
+      const enc = buf[start];
+      let i = start + 1;
+      while (i < end && buf[i] !== 0) i++;       // bỏ MIME
+      i += 2;                                     // null + loại ảnh
+      if (enc === 0 || enc === 3) { while (i < end && buf[i] !== 0) i++; i++; }
+      else { while (i + 1 < end && !(buf[i] === 0 && buf[i + 1] === 0)) i += 2; i += 2; }
+      const data = buf.slice(i, end);
+      if (data.length < 100) return null;
+      return new Blob([data], { type: sniffMime(data) });
+    }
+    p = end;
+  }
+  return null;
+}
+
+// M4A / M4B: atom moov → covr
+async function readMp4Cover(file) {
+  let pos = 0;
+  const total = file.size;
+  while (pos + 8 <= total) {
+    const dv = new DataView(await file.slice(pos, pos + 16).arrayBuffer());
+    let size = dv.getUint32(0), hdr = 8;
+    const type = String.fromCharCode(dv.getUint8(4), dv.getUint8(5), dv.getUint8(6), dv.getUint8(7));
+    if (size === 1) { size = Number(dv.getBigUint64(8)); hdr = 16; }
+    else if (size === 0) size = total - pos;
+    if (size < 8) break;
+    if (type === 'moov') {
+      if (size > 48 * 1024 * 1024) return null;
+      const moov = new Uint8Array(await file.slice(pos + hdr, pos + size).arrayBuffer());
+      for (let i = 4; i + 24 < moov.length; i++) {
+        if (moov[i] === 0x63 && moov[i + 1] === 0x6F && moov[i + 2] === 0x76 && moov[i + 3] === 0x72) { // "covr"
+          const dsize = new DataView(moov.buffer, moov.byteOffset + i + 4, 4).getUint32(0);
+          const data = moov.slice(i + 20, i + 4 + dsize);
+          if (data.length > 100) return new Blob([data], { type: sniffMime(data) });
+        }
+      }
+      return null;
+    }
+    pos += size;
+  }
+  return null;
+}
+
+async function embeddedCover(file) {
+  try {
+    if (/\.mp3$/i.test(file.name)) return await readID3Cover(file);
+    if (/\.(m4a|m4b|aac)$/i.test(file.name)) return await readMp4Cover(file);
+  } catch (e) {}
+  return null;
+}
+
+/* ============ Lấy ảnh cho từng bài ============ */
+const mkUrl = blob => { const u = URL.createObjectURL(blob); allUrls.push(u); return u; };
+const dirUrls = new Map();
+
+async function getCover(t) {
+  if (t.cover !== undefined) return t.cover;
+  let url = null;
+  const same = imageMap.get(baseName(t.path).toLowerCase());          // 1. ảnh trùng tên file
+  if (same) url = mkUrl(same);
+  if (!url) {                                                          // 2. ảnh nhúng trong file
+    const blob = await embeddedCover(t.file);
+    if (blob) url = mkUrl(blob);
+  }
+  if (!url) {                                                          // 3. cover.jpg trong thư mục
+    const d = dirOf(t.path), img = dirCover.get(d);
+    if (img) { if (!dirUrls.has(d)) dirUrls.set(d, mkUrl(img)); url = dirUrls.get(d); }
+  }
+  t.cover = url;
+  return url;
+}
+
+function paintThumb(el, url, i) {
+  if (url) { el.style.backgroundImage = `url("${url}")`; el.textContent = ''; }
+  else { el.style.backgroundImage = placeholder(i); el.textContent = i + 1; }
+}
+
+const io = new IntersectionObserver(entries => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    io.unobserve(en.target);
+    const t = en.target._track;
+    getCover(t).then(url => {
+      paintThumb(t.thumbEl, url, tracks.indexOf(t));
+      if (t === cur) paintNow();
+    });
+  }
+}, { root: list, rootMargin: '300px' });
+
+/* ============ Chọn thư mục ============ */
+$('pick').onclick = pickFolder;
+$('pickLegacy').onclick = () => $('picker').click();
+
+// Cách cũ (mọi trình duyệt): không nhớ được thư mục
+$('picker').onchange = e => {
+  const entries = [...e.target.files].map(f => ({ file: f, path: f.webkitRelativePath || f.name }));
+  e.target.value = '';
+  loadEntries(entries);
+};
+
+/* ----- Thông báo nhỏ ----- */
+let toastT;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3800);
+}
+
+/* ----- Chọn thư mục (Chrome/Edge) + nhớ lại ----- */
+async function pickFolder() {
+  if (!window.showDirectoryPicker) { $('picker').click(); return; }   // Firefox/Safari: dùng cách cũ
+  let handle;
+  try { handle = await showDirectoryPicker({ id: 'abp', mode: 'read' }); }
+  catch (err) { return; }                                             // người dùng bấm Hủy
+  await openHandle(handle);
+}
+
+async function walkDir(dir, prefix, out, depth) {
+  for await (const [name, h] of dir.entries()) {
+    try {
+      if (h.kind === 'file') {
+        if (AUDIO_EXT.test(name) || IMG_EXT.test(name)) out.push({ file: await h.getFile(), path: prefix + name });
+      } else if (depth < 6) {
+        await walkDir(h, prefix + name + '/', out, depth + 1);
+      }
+    } catch (_) { /* bỏ qua thư mục/file không đọc được */ }
+  }
+  return out;
+}
+
+async function openHandle(handle) {
+  try {
+    if ((await handle.queryPermission({ mode: 'read' })) !== 'granted' &&
+        (await handle.requestPermission({ mode: 'read' })) !== 'granted') {
+      toast('Chưa được cấp quyền đọc thư mục này.'); return;
+    }
+    toast('Đang quét thư mục…');
+    const entries = await walkDir(handle, handle.name + '/', [], 0);
+    if (loadEntries(entries)) { toast('Đã mở: ' + handle.name); await rememberFolder(handle); }
+  } catch (err) {
+    toast('Không mở được thư mục. Ổ có thể chưa cắm, hoặc thư mục đã bị đổi tên/xóa.');
+  }
+}
+
+/* ----- Danh sách gần đây (IndexedDB) ----- */
+const openDB = () => new Promise((res, rej) => {
+  const r = indexedDB.open('abp-db', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('dirs', { keyPath: 'id' });
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+async function dbTx(mode, fn) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const t = db.transaction('dirs', mode);
+    const req = fn(t.objectStore('dirs'));
+    t.oncomplete = () => { db.close(); res(req ? req.result : undefined); };
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+}
+async function getRecents() {
+  try { return ((await dbTx('readonly', st => st.getAll())) || []).sort((a, b) => b.time - a.time); }
+  catch (_) { return []; }
+}
+async function rememberFolder(handle) {
+  try {
+    const recs = await getRecents();
+    let rec = null;
+    for (const r of recs) { try { if (await r.handle.isSameEntry(handle)) { rec = r; break; } } catch (_) {} }
+    if (rec) { rec.time = Date.now(); rec.handle = handle; await dbTx('readwrite', st => st.put(rec)); }
+    else await dbTx('readwrite', st => st.put({ id: Date.now() + '-' + Math.random().toString(36).slice(2), name: handle.name, handle, time: Date.now() }));
+    const all = await getRecents();                       // giữ tối đa 8 mục
+    for (const r of all.slice(8)) await dbTx('readwrite', st => st.delete(r.id));
+  } catch (_) {}
+  renderRecent();
+}
+async function renderRecent() {
+  const recs = await getRecents();
+  $('recentWrap').style.display = recs.length ? '' : 'none';
+  const box = $('recent'); box.innerHTML = '';
+  recs.forEach(r => {
+    const row = document.createElement('div'); row.className = 'rec';
+    const b = document.createElement('button'); b.className = 'rec-name'; b.textContent = r.name; b.title = 'Mở lại thư mục này';
+    b.onclick = () => openHandle(r.handle);
+    const x = document.createElement('button'); x.className = 'rec-x'; x.textContent = '×'; x.title = 'Xóa khỏi danh sách';
+    x.onclick = async e => { e.stopPropagation(); await dbTx('readwrite', st => st.delete(r.id)); renderRecent(); };
+    row.append(b, x); box.appendChild(row);
+  });
+  const cb = $('continueBox');                            // nút "Tiếp tục" ở màn hình trống
+  if (cb) {
+    cb.innerHTML = '';
+    if (recs[0]) {
+      const c = document.createElement('button'); c.className = 'btn-primary'; c.textContent = '▶ Tiếp tục: ' + recs[0].name;
+      c.onclick = () => openHandle(recs[0].handle); cb.appendChild(c);
+    }
+  }
+}
+
+/* ----- Nạp danh sách file vào app ----- */
+function loadEntries(entries) {
+  const auds = entries.filter(x => AUDIO_EXT.test(x.file.name));
+  if (!auds.length) { toast('Không tìm thấy file audio trong thư mục này.'); return false; }
+
+  if (cur) { saved.pos[cur.path] = audio.currentTime; persist(); }     // lưu vị trí thư mục đang nghe
+
+  allUrls.forEach(u => URL.revokeObjectURL(u)); allUrls = []; dirUrls.clear();
+  imageMap = new Map(); dirCover = new Map();
+  const preferred = new Set();
+  loadToken++;
+
+  entries.filter(x => IMG_EXT.test(x.file.name)).forEach(({ file: f, path }) => {
+    imageMap.set(baseName(path).toLowerCase(), f);
+    const d = dirOf(path), nm = baseName(f.name).toLowerCase();
+    const pref = /^(cover|folder|front|album|albumart|artwork|thumb)$/.test(nm);
+    if (!dirCover.has(d) || (pref && !preferred.has(d))) { dirCover.set(d, f); if (pref) preferred.add(d); }
+  });
+
+  tracks = auds.map(({ file, path }) => ({ file, path, name: baseName(file.name), dur: 0, cover: undefined }));
+  rootName = tracks[0].path.split('/')[0] || 'thư mục';
+  try { saved = Object.assign({ last: null, pos: {}, done: {} }, JSON.parse(localStorage.getItem('abp:' + rootName) || '{}')); }
+  catch (_) { saved = { last: null, pos: {}, done: {} }; }
+
+  cur = null;
+  audio.pause(); audio.removeAttribute('src');
+  applySort();
+
+  $('stCount').textContent = tracks.length;
+  $('stTotal').textContent = '–';
+  $('nowSub').textContent = rootName;
+  loadDurations(loadToken);
+
+  const last = tracks.find(t => t.path === saved.last);
+  if (last) { load(last, saved.pos[last.path] || 0, false); last.el.scrollIntoView({ block: 'center' }); }
+  return true;
+}
+
+renderRecent();
+
+function applySort() {
+  const mode = $('sort').value;
+  if (mode === 'za') tracks.sort((a, b) => collator.compare(b.path, a.path));
+  else if (mode === 'date') tracks.sort((a, b) => a.file.lastModified - b.file.lastModified);
+  else tracks.sort((a, b) => collator.compare(a.path, b.path));
+  render();
+}
+
+function render() {
+  list.innerHTML = '';
+  tracks.forEach((t, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="idx"><span></span><div class="eq"><i></i><i></i><i></i></div></div>
+      <div class="thumb"></div>
+      <div style="min-width:0"><div class="title"></div><div class="path"></div></div>
+      <div class="dur"></div>`;
+    li.querySelector('.idx span').textContent = i + 1;
+    li.querySelector('.title').textContent = t.name;
+    const d = dirOf(t.path).split('/').slice(1).join(' / ');
+    li.querySelector('.path').textContent = d;
+    li.querySelector('.path').style.display = d ? '' : 'none';
+    t.thumbEl = li.querySelector('.thumb');
+    t.durEl = li.querySelector('.dur');
+    t.durEl.textContent = t.dur ? fmt(t.dur) : '';
+    paintThumb(t.thumbEl, t.cover || null, i);
+    t.thumbEl._track = t;
+    li.classList.toggle('done', !!saved.done[t.path]);
+    li.classList.toggle('active', t === cur);
+    li.onclick = () => load(t, 0, true);
+    t.el = li;
+    list.appendChild(li);
+    io.observe(t.thumbEl);
+  });
+  filterList();
+}
+
+function filterList() {
+  const q = norm($('search').value.trim());
+  tracks.forEach(t => { t.el.style.display = !q || norm(t.name).includes(q) ? '' : 'none'; });
+}
+
+/* ============ Thời lượng ============ */
+function probe(file) {
+  return new Promise(res => {
+    const a = new Audio(), u = URL.createObjectURL(file);
+    let fin = false;
+    const done = v => { if (fin) return; fin = true; URL.revokeObjectURL(u); a.removeAttribute('src'); res(v); };
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => done(isFinite(a.duration) ? a.duration : 0);
+    a.onerror = () => done(0);
+    a.src = u;
+    setTimeout(() => done(0), 10000);
+  });
+}
+async function loadDurations(token) {
+  for (const t of tracks) {
+    if (token !== loadToken) return;
+    t.dur = await probe(t.file);
+    if (t.durEl) t.durEl.textContent = t.dur ? fmt(t.dur) : '';
+    updateTotal();
+  }
+}
+function updateTotal() {
+  const s = tracks.reduce((a, t) => a + (t.dur || 0), 0);
+  $('stTotal').textContent = s ? (s >= 3600 ? (s / 3600).toFixed(1) + ' giờ' : Math.round(s / 60) + ' phút') : '–';
+}
+
+/* ============ Phát nhạc ============ */
+let curUrl = null;
+function load(t, startAt, autoplay) {
+  cur = t;
+  if (curUrl) URL.revokeObjectURL(curUrl);
+  curUrl = URL.createObjectURL(t.file);
+  audio.src = curUrl;
+  audio.defaultPlaybackRate = audio.playbackRate = parseFloat($('rate').value);
+  audio.addEventListener('loadedmetadata', () => { if (startAt) audio.currentTime = startAt; }, { once: true });
+  if (autoplay) audio.play().catch(() => {});
+  tracks.forEach(x => x.el && x.el.classList.toggle('active', x === t));
+  saved.last = t.path; persist();
+  paintNow();
+  getCover(t).then(() => { if (cur === t) paintNow(); });
+}
+
+function paintNow() {
+  if (!cur) return;
+  const i = tracks.indexOf(cur);
+  $('nowTitle').textContent = cur.name;
+  $('nowSub').textContent = `Phần ${i + 1} / ${tracks.length} · ${rootName}`;
+  $('miniTitle').textContent = cur.name;
+  $('miniSub').textContent = rootName;
+  const big = $('bigCover'), mini = $('miniThumb');
+  if (cur.cover) {
+    big.style.backgroundImage = mini.style.backgroundImage = `url("${cur.cover}")`;
+    big.textContent = mini.textContent = '';
+    $('bg').style.backgroundImage = `url("${cur.cover}")`; $('bg').classList.add('has-cover');
+  } else {
+    big.style.backgroundImage = mini.style.backgroundImage = placeholder(i);
+    big.textContent = '♪'; mini.textContent = '♪';
+    $('bg').style.backgroundImage = ''; $('bg').classList.remove('has-cover');
+  }
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cur.name, artist: rootName, album: rootName,
+      artwork: cur.cover ? [{ src: cur.cover }] : []
+    });
+  }
+}
+
+function next() { const i = tracks.indexOf(cur); if (i >= 0 && i + 1 < tracks.length) load(tracks[i + 1], 0, true); }
+function prev() {
+  if (audio.currentTime > 4) { audio.currentTime = 0; return; }
+  const i = tracks.indexOf(cur); if (i > 0) load(tracks[i - 1], 0, true);
+}
+function toggle() {
+  if (!cur && tracks.length) { load(tracks[0], 0, true); return; }
+  if (cur) audio.paused ? audio.play() : audio.pause();
+}
+
+$('play').onclick = toggle;
+$('next').onclick = next;
+$('prev').onclick = prev;
+$('back15').onclick = () => audio.currentTime = Math.max(0, audio.currentTime - 15);
+$('fwd15').onclick = () => audio.currentTime = Math.min(audio.duration || 1e9, audio.currentTime + 15);
+$('rate').onchange = e => audio.playbackRate = audio.defaultPlaybackRate = parseFloat(e.target.value);
+$('vol').oninput = e => { audio.volume = e.target.value; setPct(e.target); };
+$('search').oninput = filterList;
+$('sort').onchange = applySort;
+$('size').onchange = e => { document.body.className = 'size-' + e.target.value + (audio.paused ? '' : ' is-playing'); };
+
+/* ============ Thanh tua ============ */
+function setPct(el) { el.style.setProperty('--pct', (el.max > 0 ? el.value / el.max * 100 : 0) + '%'); }
+$('seek').oninput = e => { audio.currentTime = e.target.value; setPct(e.target); };
+audio.onloadedmetadata = () => {
+  $('seek').max = audio.duration; $('total').textContent = fmt(audio.duration);
+  if (cur && !cur.dur) { cur.dur = audio.duration; cur.durEl.textContent = fmt(cur.dur); updateTotal(); }
+};
+audio.ontimeupdate = () => {
+  $('seek').value = audio.currentTime; setPct($('seek')); $('cur').textContent = fmt(audio.currentTime);
+  if (cur && Date.now() - lastSave > 3000) { lastSave = Date.now(); saved.pos[cur.path] = audio.currentTime; persist(); }
+};
+audio.onplay = () => {
+  $('play').innerHTML = ICON_PAUSE; document.body.classList.add('is-playing');
+  cur && cur.el.classList.add('playing');
+};
+audio.onpause = () => {
+  $('play').innerHTML = ICON_PLAY; document.body.classList.remove('is-playing');
+  cur && cur.el.classList.remove('playing');
+  if (cur && audio.currentTime > 0) { saved.pos[cur.path] = audio.currentTime; persist(); }
+};
+audio.onended = () => {
+  if (cur) { saved.done[cur.path] = true; saved.pos[cur.path] = 0; persist(); cur.el.classList.add('done'); cur.el.classList.remove('playing'); }
+  if (sleepAtEnd) { sleepAtEnd = false; $('sleep').value = '0'; return; }
+  next();
+};
+audio.onerror = () => {
+  if (!cur) return;
+  $('nowSub').textContent = 'Không đọc được file này (có thể ổ bị rút hoặc file đã bị xóa)';
+};
+
+/* ============ Hẹn giờ tắt ============ */
+$('sleep').onchange = e => {
+  clearTimeout(sleepTimer); sleepAtEnd = false;
+  const v = e.target.value;
+  if (v === 'end') sleepAtEnd = true;
+  else if (+v > 0) sleepTimer = setTimeout(() => { audio.pause(); $('sleep').value = '0'; }, +v * 60000);
+};
+
+/* ============ Lưu vị trí nghe ============ */
+function persist() {
+  if (!rootName) return;
+  try { localStorage.setItem('abp:' + rootName, JSON.stringify(saved)); } catch (_) {}
+}
+window.addEventListener('beforeunload', () => { if (cur) { saved.pos[cur.path] = audio.currentTime; persist(); } });
+
+/* ============ Phím tắt + phím media ============ */
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' && e.target.type !== 'range' || tag === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); toggle(); }
+  else if (e.code === 'ArrowRight') { e.preventDefault(); $('fwd15').click(); }
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); $('back15').click(); }
+});
+if ('mediaSession' in navigator) {
+  const ms = navigator.mediaSession;
+  ms.setActionHandler('play', () => audio.play());
+  ms.setActionHandler('pause', () => audio.pause());
+  ms.setActionHandler('previoustrack', prev);
+  ms.setActionHandler('nexttrack', next);
+  ms.setActionHandler('seekbackward', () => $('back15').click());
+  ms.setActionHandler('seekforward', () => $('fwd15').click());
+}
+setPct($('vol'));
+
+/* ============ Theme sáng / tối ============ */
+const ICON_SUN  = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>';
+const ICON_MOON = '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function paintTheme() {
+  const light = document.documentElement.dataset.theme === 'light';
+  $('theme').innerHTML = light ? ICON_MOON : ICON_SUN;      // hiện icon của theme sẽ chuyển sang
+  $('theme').title = light ? 'Chuyển sang giao diện tối' : 'Chuyển sang giao diện sáng';
+}
+$('theme').onclick = () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('abp:theme', next); } catch (_) {}
+  paintTheme();
+};
+// Nếu chưa tự chọn thì đi theo chế độ của hệ điều hành
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
+  let chosen = null; try { chosen = localStorage.getItem('abp:theme'); } catch (_) {}
+  if (chosen) return;
+  document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+  paintTheme();
+});
+paintTheme();
+</script>
+</body>
+</html>
