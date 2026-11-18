@@ -63,7 +63,3 @@ Lưu ý khi build trên Windows:
 - Thư mục gần đây và vị trí đang nghe được lưu trong bộ nhớ của trình duyệt (hoặc của Electron) trên máy đang dùng, nên không đi theo file `.exe` sang máy khác.
 - Với ổ cứng di động: nếu rút ổ trong lúc đang nghe, app sẽ báo không đọc được file. Cắm lại ổ và mở lại thư mục từ mục "Gần đây".
 - Khi chạy trên Chrome/Edge, đừng chọn thẳng gốc ổ đĩa (ví dụ `E:\`) vì trình duyệt chặn. Hãy chọn thư mục con chứa sách.
-
-## Giấy phép
-
-Chưa chọn giấy phép. Nếu muốn cho người khác dùng và sửa đổi, bạn có thể thêm file `LICENSE` (ví dụ MIT) và ghi tên giấy phép ở đây.
